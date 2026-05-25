@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automated Class Routine Manager</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin: 20px auto;
+        }
+        h2 { text-align: center; color: #2c3e50; }
+        label { font-weight: bold; display: block; margin-top: 15px; }
+        input, select, textarea, button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #27ae60;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            margin-top: 20px;
+        }
+        button:hover { background-color: #219653; }
+        .status-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: #eef2f3;
+            border-left: 5px solid #2980b9;
+            font-size: 14px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Class Routine Control Panel</h2>
+    
+    <button onclick="requestNotificationPermission()" style="background-color: #2980b9;">Enable Phone Notification Sound</button>
+    
+    <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+
+    <label for="sectionInput">Enter Your Section Name:</label>
+    <input type="text" id="sectionInput" placeholder="e.g., Section_A">
+
+    <label for="routineFiles">Upload Bulk Routine Files (.txt format):</label>
+    <input type="file" id="routineFiles" multiple accept=".txt">
+
+    <button onclick="processAndFilterRoutines()">Filter and Save Routine</button>
+
+    <div class="status-box" id="statusOutput">System Idle. Waiting for user input...</div>
+</div>
+
+<script>
+    let savedRoutines = [];
+    let audioContext = null;
+
+    // Request permissions for background notification and audio ring
+    function requestNotificationPermission() {
+        if (!("Notification" in window)) {
+            alert("This browser does not support desktop notification");
+            return;
+        }
+        Notification.requestPermission().then(permission => {
+            if (permission === "granted") {
+                document.getElementById("statusOutput").innerText = "Notification Permission Granted!\nSound alert channel is active.";
+                // Initialize Audio Context for 15-second ring simulation
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        });
+    }
+
+    // Processing multi-line text files and filtering specific section
+    function processAndFilterRoutines() {
+        const sectionName = document.getElementById("sectionInput").value.trim();
+        const fileInput = document.getElementById("routineFiles");
+        
+        if (!sectionName) {
+            alert("Please enter a section name first!");
+            return;
+        }
+        if (fileInput.files.length === 0) {
+            alert("Please select at least one routine file.");
+            return;
+        }
+
+        savedRoutines = [];
+        let filesProcessed = 0;
+
+        for (let i = 0; i < fileInput.files.length; i++) {
+            const file = fileInput.files[i];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const lines = e.target.result.split('\n');
+                lines.forEach(line => {
+                    if (line.includes(sectionName)) {
+                        // Expected Format: Section Subject Code Time Day Teacher
+                        // Example: Section_A Physics PHY101 14:30 Monday Dr.John
+                        const parts = line.trim().split(/\s+/);
+                        if (parts.length >= 6) {
+                            savedRoutines.push({
+                                section: parts[0],
+                                subject: parts[1],
+                                code: parts[2],
+                                time: parts[3],
+                                day: parts[4],
+                                teacher: parts[5]
+                            });
+                        }
+                    }
+                });
+
+                filesProcessed++;
+                if (filesProcessed === fileInput.files.length) {
+                    updateStatusAndStartTracker(sectionName);
+                }
+            };
+            reader.readAsText(file);
+        }
+    }
+
+    function updateStatusAndStartTracker(section) {
+        let outputText = `Successfully saved ${savedRoutines.length} classes for ${section}.\n\n`;
+        savedRoutines.forEach(r => {
+            outputText += `- ${r.subject} (${r.code}) at ${r.time} on ${r.day}\n`;
+        });
+        document.getElementById("statusOutput").innerText = outputText;
+
+        // Start background checking every 30 seconds
+        setInterval(checkRoutineTimeAndNotify, 30000);
+    }
+
+    // Alarm core scheduler logic (checks for 45 minutes gap)
+    function checkRoutineTimeAndNotify() {
+        const now = new Date();
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const currentDay = days[now.getDay()];
+        
+        savedRoutines.forEach(routine => {
+            if (routine.day.toLowerCase() === currentDay.toLowerCase()) {
+                const [classHour, classMinute] = routine.time.split(':').map(Number);
+                
+                // Calculate total minutes for current time and class time
+                const currentTotalMinutes = (now.getHours() * 60) + now.getMinutes();
+                const classTotalMinutes = (classHour * 60) + classMinute;
+
+                // Check if exactly 45 minutes are remaining before class
+                if (classTotalMinutes - currentTotalMinutes === 45) {
+                    triggerPhoneAlarm(routine.subject, routine.code);
+                }
+            }
+        });
+    }
+
+    // Triggers Push Notification and plays an active sound for exactly 15 seconds
+    function triggerPhoneAlarm(subject, code) {
+        if (Notification.permission === "granted") {
+            new Notification("Class Alert!", {
+                body: `${subject} (${code}) starts in 45 minutes!`,
+                icon: "https://cdn-icons-png.flaticon.com/512/2693/2693507.png"
+            });
+        }
+
+        // Generate and play a clean alarm sound for exactly 15 seconds
+        if (audioContext) {
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // Beep sound pitch
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.start();
+            document.getElementById("statusOutput").innerText += `\n[ALERTING] Alarm ringing for 15 seconds!`;
+
+            // Automatically stop the alarm sound exactly after 15 seconds
+            setTimeout(() => {
+                oscillator.stop();
+                document.getElementById("statusOutput").innerText += `\n[IDLE] Alarm stopped automatically.`;
+            }, 15000);
+        }
+    }
+</script>
+
+</body>
+</html>
